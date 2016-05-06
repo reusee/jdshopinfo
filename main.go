@@ -6,8 +6,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,6 +36,17 @@ type Info struct {
 }
 
 func main() {
+	switch os.Args[1] {
+	case "collect":
+		collect()
+	case "stat":
+		stat()
+	default:
+		pt("no such command %s\n", os.Args[1])
+	}
+}
+
+func collect() {
 	date := time.Now().Format("2006-01-02")
 
 	for _, keyword := range keywords {
@@ -53,10 +66,13 @@ func main() {
 		pt("shop %d %s\n", shopId, keyword)
 
 		skus := make(map[string]bool)
+		var skusLock sync.Mutex
 		processInfos := func(infos []Info) {
 			tx := db.MustBegin()
 			for _, info := range infos {
+				skusLock.Lock()
 				skus[info.WareId] = true
+				skusLock.Unlock()
 				tx.MustExec(`INSERT INTO items 
 					(sku, shop_id, category, added_date)
 					VALUES ($1, $2, $3, $4)
@@ -96,12 +112,24 @@ func main() {
 		processInfos(infos)
 		maxPage := (total / 10) + 1
 
+		wg := new(sync.WaitGroup)
+		wg.Add(maxPage - 1)
+		sem := make(chan bool, 8)
 		for page := 2; page <= maxPage; page++ {
-			pt("page %d / %d\n", page, maxPage)
-			infos, _, err = GetKeywordPage(keyword, page)
-			ce(err, "get infos")
-			processInfos(infos)
+			page := page
+			sem <- true
+			go func() {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				pt("page %d / %d\n", page, maxPage)
+				infos, _, err = GetKeywordPage(keyword, page)
+				ce(err, "get infos")
+				processInfos(infos)
+			}()
 		}
+		wg.Wait()
 
 		pt("collected %d items\n", len(skus))
 	}
@@ -124,11 +152,25 @@ func GetKeywordPage(keyword string, page int) (infos []Info, total int, err erro
 	//req.Header.Set("Referer", "http://so.m.jd.com/ware/search.action?sid=39661583a3d28d872d9fe529d611eadd&keyword=%E7%A9%86%E7%BE%8E&catelogyList=")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	retry := 10
+do:
 	resp, err := http.DefaultClient.Do(req)
-	ce(err, "post %s %v", reqUrl, form)
+	if err != nil {
+		if retry > 0 {
+			retry--
+			goto do
+		}
+		ce(err, "get page %s %d", keyword, page)
+	}
 	defer resp.Body.Close()
 	content, err := ioutil.ReadAll(resp.Body)
-	ce(err, "get content")
+	if err != nil {
+		if retry > 0 {
+			retry--
+			goto do
+		}
+		ce(err, "get content")
+	}
 
 	var wrap struct {
 		AreaName string
