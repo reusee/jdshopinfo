@@ -20,7 +20,7 @@ func initSchema() {
 	db.MustExec(`CREATE INDEX IF NOT EXISTS shop_name ON shops (name)`)
 
 	db.MustExec(`CREATE TABLE IF NOT EXISTS items (
-		sku BIGINT PRIMARY KEY,
+		spu BIGINT PRIMARY KEY,
 		shop_id INTEGER,
 		category TEXT,
 		added_date TEXT
@@ -29,7 +29,7 @@ func initSchema() {
 		ON items (category)`)
 
 	db.MustExec(`CREATE TABLE IF NOT EXISTS infos (
-		sku BIGINT NOT NULL,
+		spu BIGINT NOT NULL,
 		date TEXT NOT NULL,
 		good_rate SMALLINT,
 		price DECIMAL(10, 2) NOT NULL,
@@ -37,8 +37,8 @@ func initSchema() {
 		title TEXT,
 		image_url TEXT
 	)`)
-	db.MustExec(`CREATE UNIQUE INDEX IF NOT EXISTS sku_date_info
-		ON infos (sku, date)`)
+	db.MustExec(`CREATE UNIQUE INDEX IF NOT EXISTS spu_date_info
+		ON infos (spu, date)`)
 	db.MustExec(`CREATE INDEX IF NOT EXISTS date
 		ON infos (date)`)
 }
